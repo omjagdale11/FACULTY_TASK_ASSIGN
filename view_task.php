@@ -19,11 +19,12 @@ $task_id = $_GET["id"];
 // Fetch task details
 $sql = "SELECT t.*, u.username as created_by_name, 
         ta.assigned_date, ta.completion_date,
-        a.username as assigned_to_name, a.faculty_name, a.department
+        a.username as assigned_to_name, a.faculty_name, a.department,
+        ta.user_id as assigned_user_id
         FROM tasks t 
         LEFT JOIN users u ON t.created_by = u.id
         LEFT JOIN task_assignments ta ON t.id = ta.task_id
-        LEFT JOIN users a ON ta.assigned_to = a.id
+        LEFT JOIN users a ON ta.user_id = a.id
         WHERE t.id = ?";
 
 if($stmt = mysqli_prepare($conn, $sql)){
@@ -33,7 +34,7 @@ if($stmt = mysqli_prepare($conn, $sql)){
     
     if($task = mysqli_fetch_assoc($result)){
         // Check if user has permission to view this task
-        if($_SESSION["role"] == "faculty" && $task["assigned_to"] != $_SESSION["id"]){
+        if($_SESSION["role"] == "faculty" && $task["assigned_user_id"] != $_SESSION["id"]){
             header("location: faculty_dashboard.php");
             exit;
         }
@@ -55,16 +56,27 @@ if($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["status"])){
     if(mysqli_stmt_execute($update_stmt)){
         // Update completion date if status is Completed
         if($new_status == "Completed"){
-            $completion_sql = "UPDATE task_assignments SET completion_date = NOW() WHERE task_id = ? AND assigned_to = ?";
+            $completion_sql = "UPDATE task_assignments SET completion_date = NOW() WHERE task_id = ? AND user_id = ?";
             $completion_stmt = mysqli_prepare($conn, $completion_sql);
             mysqli_stmt_bind_param($completion_stmt, "ii", $task_id, $_SESSION["id"]);
             mysqli_stmt_execute($completion_stmt);
             mysqli_stmt_close($completion_stmt);
         }
         
-        // Refresh the page to show updated status
-        header("location: view_task.php?id=" . $task_id);
-        exit;
+        // Store notification in session for admin
+        if(!isset($_SESSION['notifications']['admin'])){
+            $_SESSION['notifications']['admin'] = array();
+        }
+        $_SESSION['notifications']['admin'][] = array(
+            'type' => 'task_completed',
+            'message' => 'Task "' . $task["title"] . '" has been completed by ' . $_SESSION["faculty_name"],
+            'task_id' => $task_id,
+            'timestamp' => date('Y-m-d H:i:s')
+        );
+        
+        $success_msg = "Task marked as completed successfully.";
+    } else {
+        $error_msg = "Something went wrong. Please try again later.";
     }
     
     mysqli_stmt_close($update_stmt);
@@ -102,6 +114,79 @@ if($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["comment"])){
         
         mysqli_stmt_close($comment_stmt);
     }
+}
+
+// Get task assignments
+$assign_sql = "SELECT ta.*, u.faculty_name, u.department 
+               FROM task_assignments ta 
+               JOIN users u ON ta.user_id = u.id 
+               WHERE ta.task_id = ?";
+$assign_stmt = mysqli_prepare($conn, $assign_sql);
+mysqli_stmt_bind_param($assign_stmt, "i", $task_id);
+mysqli_stmt_execute($assign_stmt);
+$assignments = mysqli_stmt_get_result($assign_stmt);
+
+// Get task attachments
+$attach_sql = "SELECT fa.*, u.faculty_name 
+               FROM file_attachments fa 
+               JOIN users u ON fa.user_id = u.id 
+               WHERE fa.task_id = ? 
+               ORDER BY fa.upload_date DESC";
+$attach_stmt = mysqli_prepare($conn, $attach_sql);
+mysqli_stmt_bind_param($attach_stmt, "i", $task_id);
+mysqli_stmt_execute($attach_stmt);
+$attachments = mysqli_stmt_get_result($attach_stmt);
+
+// Handle file upload
+if($_SERVER["REQUEST_METHOD"] == "POST" && isset($_FILES['submission'])) {
+    $upload_dir = "uploads/tasks/";
+    if (!file_exists($upload_dir)) {
+        mkdir($upload_dir, 0777, true);
+    }
+    
+    foreach($_FILES['submission']['tmp_name'] as $key => $tmp_name) {
+        $file_name = $_FILES['submission']['name'][$key];
+        $file_type = $_FILES['submission']['type'][$key];
+        $file_size = $_FILES['submission']['size'][$key];
+        
+        // Generate unique filename
+        $file_extension = pathinfo($file_name, PATHINFO_EXTENSION);
+        $unique_filename = uniqid() . '_' . time() . '.' . $file_extension;
+        $file_path = $upload_dir . $unique_filename;
+        
+        if(move_uploaded_file($tmp_name, $file_path)) {
+            // Insert file attachment record
+            $file_sql = "INSERT INTO file_attachments (task_id, user_id, file_name, file_path, file_type, is_submission) VALUES (?, ?, ?, ?, ?, 1)";
+            $file_stmt = mysqli_prepare($conn, $file_sql);
+            mysqli_stmt_bind_param($file_stmt, "iisss", $task_id, $_SESSION["id"], $file_name, $file_path, $file_type);
+            mysqli_stmt_execute($file_stmt);
+            mysqli_stmt_close($file_stmt);
+        }
+    }
+    
+    // Update task status to In Progress if it's Pending
+    $update_sql = "UPDATE tasks SET status = 'In Progress' WHERE id = ? AND status = 'Pending'";
+    $update_stmt = mysqli_prepare($conn, $update_sql);
+    mysqli_stmt_bind_param($update_stmt, "i", $task_id);
+    mysqli_stmt_execute($update_stmt);
+    mysqli_stmt_close($update_stmt);
+    
+    // Refresh the page
+    header("location: view_task.php?id=" . $task_id);
+    exit();
+}
+
+// Handle task completion
+if($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["complete_task"])) {
+    $complete_sql = "UPDATE tasks SET status = 'Completed' WHERE id = ?";
+    $complete_stmt = mysqli_prepare($conn, $complete_sql);
+    mysqli_stmt_bind_param($complete_stmt, "i", $task_id);
+    mysqli_stmt_execute($complete_stmt);
+    mysqli_stmt_close($complete_stmt);
+    
+    // Refresh the page
+    header("location: view_task.php?id=" . $task_id);
+    exit();
 }
 ?>
 
@@ -145,6 +230,22 @@ if($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["comment"])){
             padding: 20px;
             border-radius: 5px;
             margin-top: 20px;
+        }
+        .attachment-list {
+            list-style: none;
+            padding: 0;
+        }
+        .attachment-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid #ddd;
+            margin-bottom: 5px;
+            border-radius: 5px;
+        }
+        .attachment-item i {
+            margin-right: 10px;
+            font-size: 1.2em;
         }
     </style>
 </head>
@@ -284,6 +385,65 @@ if($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["comment"])){
                             </div>
                         </div>
                     <?php endforeach; ?>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-8">
+                        <h5>Assigned To</h5>
+                        <ul class="list-group">
+                            <?php while($assignment = mysqli_fetch_assoc($assignments)): ?>
+                                <li class="list-group-item">
+                                    <?php echo htmlspecialchars($assignment['faculty_name'] . ' (' . $assignment['department'] . ')'); ?>
+                                </li>
+                            <?php endwhile; ?>
+                        </ul>
+                    </div>
+                    
+                    <div class="col-md-4">
+                        <h5>Attachments</h5>
+                        <ul class="attachment-list">
+                            <?php while($attachment = mysqli_fetch_assoc($attachments)): ?>
+                                <li class="attachment-item">
+                                    <?php
+                                    $icon = 'fa-file';
+                                    if(strpos($attachment['file_type'], 'image') !== false) {
+                                        $icon = 'fa-image';
+                                    } elseif(strpos($attachment['file_type'], 'pdf') !== false) {
+                                        $icon = 'fa-file-pdf';
+                                    } elseif(strpos($attachment['file_type'], 'word') !== false) {
+                                        $icon = 'fa-file-word';
+                                    }
+                                    ?>
+                                    <i class="fas <?php echo $icon; ?>"></i>
+                                    <a href="<?php echo htmlspecialchars($attachment['file_path']); ?>" target="_blank">
+                                        <?php echo htmlspecialchars($attachment['file_name']); ?>
+                                    </a>
+                                    <small class="text-muted ml-2">
+                                        (<?php echo $attachment['is_submission'] ? 'Submitted by ' . $attachment['faculty_name'] : 'Original attachment'; ?>)
+                                    </small>
+                                </li>
+                            <?php endwhile; ?>
+                        </ul>
+                        
+                        <?php if($_SESSION['role'] == 'faculty' && $task['status'] != 'Completed'): ?>
+                            <form action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]) . "?id=" . $task_id; ?>" method="post" enctype="multipart/form-data" class="mt-4">
+                                <div class="form-group">
+                                    <label>Submit Files</label>
+                                    <input type="file" name="submission[]" class="form-control-file" multiple>
+                                    <small class="form-text text-muted">You can select multiple files to submit.</small>
+                                </div>
+                                <button type="submit" class="btn btn-primary">Submit Files</button>
+                            </form>
+                            
+                            <?php if($task['status'] == 'In Progress'): ?>
+                                <form action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]) . "?id=" . $task_id; ?>" method="post" class="mt-3">
+                                    <button type="submit" name="complete_task" class="btn btn-success">
+                                        Mark as Completed
+                                    </button>
+                                </form>
+                            <?php endif; ?>
+                        <?php endif; ?>
+                    </div>
                 </div>
             </div>
         </div>

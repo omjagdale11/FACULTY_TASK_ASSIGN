@@ -4,8 +4,16 @@ require_once "config.php";
 
 // Check if user is already logged in
 if(isset($_SESSION["loggedin"]) && $_SESSION["loggedin"] === true){
-    header("location: " . ($_SESSION["role"] == "admin" ? "admin_dashboard.php" : "faculty_dashboard.php"));
-    exit;
+    // If coming from manage_users.php as admin, allow access
+    if(!(isset($_GET["role"]) && $_GET["role"] == "faculty" && $_SESSION["role"] == "admin")){
+        header("location: " . ($_SESSION["role"] == "admin" ? "admin_dashboard.php" : "faculty_dashboard.php"));
+        exit;
+    }
+}
+
+// Check if coming from manage_users.php
+if(isset($_GET["role"]) && $_GET["role"] == "faculty") {
+    $role = "faculty";
 }
 
 // Initialize variables
@@ -138,8 +146,12 @@ if($_SERVER["REQUEST_METHOD"] == "POST"){
             
             // Attempt to execute the prepared statement
             if(mysqli_stmt_execute($stmt)){
-                // Redirect to login page
-                header("location: index.php");
+                // Redirect based on where the user came from
+                if(isset($_GET["role"]) && $_GET["role"] == "faculty"){
+                    header("location: manage_users.php");
+                } else {
+                    header("location: index.php");
+                }
                 exit();
             } else{
                 echo "Something went wrong. Please try again later.";
@@ -162,8 +174,34 @@ if($_SERVER["REQUEST_METHOD"] == "POST"){
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
+            padding: 20px;
+        }
+        .header-section {
+            text-align: center;
+            margin-bottom: 30px;
+            width: 100%;
+            max-width: 800px;
+        }
+        .college-logo {
+            height: 100px;
+            margin-bottom: 15px;
+        }
+        .college-name {
+            color: #343a40;
+            margin: 0;
+        }
+        .college-name h1 {
+            font-size: 28px;
+            font-weight: bold;
+            margin: 0;
+            line-height: 1.2;
+        }
+        .college-name p {
+            font-size: 18px;
+            margin: 5px 0 0 0;
         }
         .register-form {
             background: white;
@@ -172,19 +210,46 @@ if($_SERVER["REQUEST_METHOD"] == "POST"){
             box-shadow: 0 0 20px rgba(0,0,0,0.1);
             width: 100%;
             max-width: 500px;
+            margin: 0 auto;
+        }
+        .form-group {
+            margin-bottom: 20px;
         }
         .form-control {
             border-radius: 5px;
             padding: 10px;
+            border: 1px solid #ddd;
+        }
+        .form-control:focus {
+            border-color: #80bdff;
+            box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
         }
         .btn-primary {
-            background: #667eea;
-            border: none;
-            padding: 10px 20px;
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
             border-radius: 5px;
+            background: #007bff;
+            border: none;
+            margin-top: 10px;
         }
         .btn-primary:hover {
-            background: #764ba2;
+            background: #0056b3;
+        }
+        .login-link {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .login-link a {
+            color: #007bff;
+            text-decoration: none;
+        }
+        .login-link a:hover {
+            text-decoration: underline;
+        }
+        .alert {
+            margin-bottom: 20px;
+            border-radius: 5px;
         }
         .role-selector {
             display: flex;
@@ -300,6 +365,18 @@ if($_SERVER["REQUEST_METHOD"] == "POST"){
                 option.classList.remove('selected');
             });
             event.currentTarget.classList.add('selected');
+        }
+
+        // Auto-select faculty role if coming from manage_users.php
+        window.onload = function() {
+            const role = document.getElementById('role').value;
+            if (role === 'faculty') {
+                document.getElementById('faculty-fields').style.display = 'block';
+                document.querySelectorAll('.role-option').forEach(option => {
+                    option.classList.remove('selected');
+                });
+                document.querySelector('.role-option:nth-child(2)').classList.add('selected');
+            }
         }
     </script>
 </body>

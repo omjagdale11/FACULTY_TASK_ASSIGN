@@ -82,6 +82,16 @@ CREATE TABLE IF NOT EXISTS comments (
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- Insert default admin user (password: admin123)
-INSERT INTO users (username, password, email, role) 
-VALUES ('admin', '12345', 'admin@example.com', 'admin'); 
+-- Create file attachments table
+CREATE TABLE file_attachments (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    task_id INT NOT NULL,
+    user_id INT NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    file_path VARCHAR(255) NOT NULL,
+    file_type VARCHAR(50) NOT NULL,
+    upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_submission BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);

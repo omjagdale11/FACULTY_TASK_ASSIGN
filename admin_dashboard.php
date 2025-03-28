@@ -8,20 +8,16 @@ if(!isset($_SESSION["loggedin"]) || $_SESSION["loggedin"] !== true || $_SESSION[
     exit;
 }
 
-// Fetch all tasks with assigned user details
-$sql = "SELECT t.*, u.username as created_by_username, 
-        ta.user_id as assigned_to_id, 
-        au.username as assigned_to_username,
-        au.faculty_name as assigned_to_name,
-        au.department as assigned_to_department
+// Fetch all tasks with assigned faculty names
+$sql = "SELECT t.*, u.faculty_name as assigned_to_name 
         FROM tasks t 
-        LEFT JOIN users u ON t.created_by = u.id 
         LEFT JOIN task_assignments ta ON t.id = ta.task_id 
-        LEFT JOIN users au ON ta.user_id = au.id 
+        LEFT JOIN users u ON ta.user_id = u.id 
         ORDER BY t.created_at DESC";
+$result = mysqli_query($conn, $sql);
 
 $tasks = array();
-if($result = mysqli_query($conn, $sql)){
+if($result){
     while($row = mysqli_fetch_assoc($result)){
         $tasks[] = $row;
     }
@@ -53,6 +49,7 @@ if($result = mysqli_query($conn, $faculty_sql)){
     <title>Admin Dashboard - Task Management System</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
     <style>
         .header-section {
             background: #fff;
@@ -115,9 +112,9 @@ if($result = mysqli_query($conn, $faculty_sql)){
 <body>
     <!-- Header with College Logo and Name -->
     <div class="header-section">
-        <div class="container-fluid">
+        <div class="container">
             <div class="d-flex align-items-center">
-                <img src="bharati.jpg" alt="Bharati Vidyapeeth Logo" class="college-logo">
+                <img src="bharati.jpg" alt="Bharati Vidyapeeth Logo" class="college-logo" style="height: 80px; width: auto;">
                 <div class="college-name">
                     <h1>Bharati Vidyapeeth (Deemed To Be University)</h1>
                     <p>Department of Management Studies(Off Campus), Navi Mumbai</p>
@@ -135,7 +132,6 @@ if($result = mysqli_query($conn, $faculty_sql)){
                     <a href="admin_dashboard.php"><i class="fas fa-home"></i> Dashboard</a>
                     <a href="create_task.php"><i class="fas fa-plus"></i> Create Task</a>
                     <a href="manage_users.php"><i class="fas fa-users"></i> Manage Users</a>
-                    <a href="reports.php"><i class="fas fa-chart-bar"></i> Reports</a>
                     <a href="profile.php"><i class="fas fa-user"></i> Profile</a>
                     <a href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
                 </nav>
@@ -143,6 +139,13 @@ if($result = mysqli_query($conn, $faculty_sql)){
 
             <!-- Main Content -->
             <div class="col-md-9 col-lg-10 main-content">
+                <h2 class="mb-4">Admin Dashboard</h2>
+                
+                <?php 
+                require_once 'notifications.php';
+                displayNotifications('admin', "admin");
+                ?>
+                
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <h2>Welcome, <?php echo htmlspecialchars($_SESSION["username"]); ?></h2>
                     <a href="create_task.php" class="btn btn-primary">
@@ -178,44 +181,6 @@ if($result = mysqli_query($conn, $faculty_sql)){
                     </div>
                 </div>
 
-                <!-- Task Filters -->
-                <div class="card mb-4">
-                    <div class="card-body">
-                        <form method="GET" class="row">
-                            <div class="col-md-3">
-                                <select name="priority" class="form-control">
-                                    <option value="">All Priorities</option>
-                                    <option value="Low">Low</option>
-                                    <option value="Medium">Medium</option>
-                                    <option value="High">High</option>
-                                    <option value="Urgent">Urgent</option>
-                                </select>
-                            </div>
-                            <div class="col-md-3">
-                                <select name="status" class="form-control">
-                                    <option value="">All Statuses</option>
-                                    <option value="Pending">Pending</option>
-                                    <option value="In Progress">In Progress</option>
-                                    <option value="Completed">Completed</option>
-                                    <option value="Overdue">Overdue</option>
-                                </select>
-                            </div>
-                            <div class="col-md-3">
-                                <select name="department" class="form-control">
-                                    <option value="">All Departments</option>
-                                    <option value="BCA">BCA</option>
-                                    <option value="BBA">BBA</option>
-                                    <option value="MCA">MCA</option>
-                                    <option value="MBA">MBA</option>
-                                </select>
-                            </div>
-                            <div class="col-md-3">
-                                <button type="submit" class="btn btn-primary">Filter</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-
                 <!-- Tasks List -->
                 <div class="row">
                     <?php foreach($tasks as $task): ?>
@@ -237,11 +202,14 @@ if($result = mysqli_query($conn, $faculty_sql)){
                                         </small>
                                     </div>
                                     <div class="mt-2">
-                                        <small>Assigned to: <?php echo htmlspecialchars($task['assigned_to_name']); ?></small>
+                                        <small>Assigned to: <?php echo htmlspecialchars($task['assigned_to_name'] ?: 'Unassigned'); ?></small>
                                     </div>
                                     <div class="mt-3">
                                         <a href="view_task.php?id=<?php echo $task['id']; ?>" class="btn btn-sm btn-info">
                                             View Details
+                                        </a>
+                                        <a href="edit_task.php?id=<?php echo $task['id']; ?>" class="btn btn-sm btn-warning">
+                                            <i class="fas fa-edit"></i> Edit
                                         </a>
                                     </div>
                                 </div>

@@ -8,16 +8,53 @@ if(!isset($_SESSION["loggedin"]) || $_SESSION["loggedin"] !== true || $_SESSION[
     exit;
 }
 
-// Fetch assigned tasks for the faculty member
+// Build the base query
 $sql = "SELECT t.*, ta.assigned_date, ta.completion_date 
         FROM tasks t 
-        LEFT JOIN task_assignments ta ON t.id = ta.task_id 
-        WHERE ta.user_id = ? 
-        ORDER BY t.due_date ASC";
+        JOIN task_assignments ta ON t.id = ta.task_id 
+        WHERE ta.user_id = ?";
 
+$params = array($_SESSION["id"]);
+$types = "i";
+
+// Apply filters if provided
+if(!empty($_GET["priority"])) {
+    $sql .= " AND t.priority = ?";
+    $params[] = $_GET["priority"];
+    $types .= "s";
+}
+
+if(!empty($_GET["status"])) {
+    $sql .= " AND t.status = ?";
+    $params[] = $_GET["status"];
+    $types .= "s";
+}
+
+if(!empty($_GET["due_date"])) {
+    switch($_GET["due_date"]) {
+        case "today":
+            $sql .= " AND DATE(t.due_date) = CURDATE()";
+            break;
+        case "week":
+            $sql .= " AND t.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)";
+            break;
+        case "month":
+            $sql .= " AND t.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 1 MONTH)";
+            break;
+        case "overdue":
+            $sql .= " AND t.due_date < CURDATE() AND t.status != 'Completed'";
+            break;
+    }
+}
+
+$sql .= " ORDER BY t.due_date ASC";
+
+// Execute the query
 $tasks = array();
 if($stmt = mysqli_prepare($conn, $sql)){
-    mysqli_stmt_bind_param($stmt, "i", $_SESSION["id"]);
+    if(!empty($params)) {
+        mysqli_stmt_bind_param($stmt, $types, ...$params);
+    }
     mysqli_stmt_execute($stmt);
     $result = mysqli_stmt_get_result($stmt);
     while($row = mysqli_fetch_assoc($result)){
@@ -41,36 +78,12 @@ $stats = array(
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Faculty Dashboard - Task Management System</title>
+    <title>My Tasks - Task Management System</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
-    <link rel="stylesheet" href="style.css">
     <style>
-        .header-section {
-            background: #fff;
-            padding: 10px 0;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        }
-        .college-logo {
-            height: 80px;
-            margin-right: 15px;
-        }
-        .college-name {
-            color: #343a40;
-            margin: 0;
-        }
-        .college-name h1 {
-            font-size: 24px;
-            font-weight: bold;
-            margin: 0;
-            line-height: 1.2;
-        }
-        .college-name p {
-            font-size: 16px;
-            margin: 0;
-        }
         .sidebar {
-            min-height: calc(100vh - 100px);
+            min-height: 100vh;
             background: #343a40;
             color: white;
         }
@@ -88,38 +101,24 @@ $stats = array(
         }
         .task-card {
             margin-bottom: 20px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
         }
-        .stats-card {
-            background: white;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        .task-card:hover {
+            transform: translateY(-5px);
         }
         .priority-high { border-left: 4px solid #dc3545; }
         .priority-medium { border-left: 4px solid #ffc107; }
         .priority-low { border-left: 4px solid #28a745; }
-        .status-pending { color: #ffc107; }
-        .status-in-progress { color: #17a2b8; }
-        .status-completed { color: #28a745; }
-        .overdue { color: #dc3545; }
+        .stats-card {
+            background: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
     </style>
 </head>
 <body>
-    <!-- Header with College Logo and Name -->
-    <div class="header-section">
-        <div class="container">
-            <div class="d-flex align-items-center">
-                <img src="bharati.jpg" alt="Bharati Vidyapeeth Logo" class="college-logo">
-                <div class="college-name">
-                    <h1>Bharati Vidyapeeth (Deemed To Be University)</h1>
-                    <p>Department of Management Studies(Off Campus), Navi Mumbai</p>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <div class="container-fluid">
         <div class="row">
             <!-- Sidebar -->
@@ -127,7 +126,8 @@ $stats = array(
                 <h3 class="text-center py-4">Task Manager</h3>
                 <nav>
                     <a href="faculty_dashboard.php"><i class="fas fa-home"></i> Dashboard</a>
-                    <a href="my_tasks.php"><i class="fas fa-tasks"></i> My Tasks</a>
+                    <a href="my_tasks.php" class="active"><i class="fas fa-tasks"></i> My Tasks</a>
+                    <a href="completed_tasks.php"><i class="fas fa-check-circle"></i> Completed Tasks</a>
                     <a href="profile.php"><i class="fas fa-user"></i> Profile</a>
                     <a href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
                 </nav>
@@ -135,14 +135,8 @@ $stats = array(
 
             <!-- Main Content -->
             <div class="col-md-9 col-lg-10 main-content">
-                <h2 class="mb-4">Welcome, <?php echo htmlspecialchars($_SESSION["faculty_name"]); ?></h2>
-                
-                <?php 
-                require_once 'notifications.php';
-                displayNotifications($_SESSION["id"], "faculty");
-                ?>
-                
                 <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2>My Tasks</h2>
                     <div>
                         <span class="badge badge-info mr-2"><?php echo htmlspecialchars($_SESSION["department"]); ?></span>
                     </div>
@@ -185,9 +179,9 @@ $stats = array(
                                     <label>Priority</label>
                                     <select name="priority" class="form-control">
                                         <option value="">All</option>
-                                        <option value="High">High</option>
-                                        <option value="Medium">Medium</option>
-                                        <option value="Low">Low</option>
+                                        <option value="High" <?php echo isset($_GET['priority']) && $_GET['priority'] == 'High' ? 'selected' : ''; ?>>High</option>
+                                        <option value="Medium" <?php echo isset($_GET['priority']) && $_GET['priority'] == 'Medium' ? 'selected' : ''; ?>>Medium</option>
+                                        <option value="Low" <?php echo isset($_GET['priority']) && $_GET['priority'] == 'Low' ? 'selected' : ''; ?>>Low</option>
                                     </select>
                                 </div>
                             </div>
@@ -196,9 +190,9 @@ $stats = array(
                                     <label>Status</label>
                                     <select name="status" class="form-control">
                                         <option value="">All</option>
-                                        <option value="Pending">Pending</option>
-                                        <option value="In Progress">In Progress</option>
-                                        <option value="Completed">Completed</option>
+                                        <option value="Pending" <?php echo isset($_GET['status']) && $_GET['status'] == 'Pending' ? 'selected' : ''; ?>>Pending</option>
+                                        <option value="In Progress" <?php echo isset($_GET['status']) && $_GET['status'] == 'In Progress' ? 'selected' : ''; ?>>In Progress</option>
+                                        <option value="Completed" <?php echo isset($_GET['status']) && $_GET['status'] == 'Completed' ? 'selected' : ''; ?>>Completed</option>
                                     </select>
                                 </div>
                             </div>
@@ -207,10 +201,10 @@ $stats = array(
                                     <label>Due Date</label>
                                     <select name="due_date" class="form-control">
                                         <option value="">All</option>
-                                        <option value="today">Today</option>
-                                        <option value="week">This Week</option>
-                                        <option value="month">This Month</option>
-                                        <option value="overdue">Overdue</option>
+                                        <option value="today" <?php echo isset($_GET['due_date']) && $_GET['due_date'] == 'today' ? 'selected' : ''; ?>>Today</option>
+                                        <option value="week" <?php echo isset($_GET['due_date']) && $_GET['due_date'] == 'week' ? 'selected' : ''; ?>>This Week</option>
+                                        <option value="month" <?php echo isset($_GET['due_date']) && $_GET['due_date'] == 'month' ? 'selected' : ''; ?>>This Month</option>
+                                        <option value="overdue" <?php echo isset($_GET['due_date']) && $_GET['due_date'] == 'overdue' ? 'selected' : ''; ?>>Overdue</option>
                                     </select>
                                 </div>
                             </div>
@@ -231,7 +225,7 @@ $stats = array(
                             <div class="card task-card priority-<?php echo strtolower($task['priority']); ?>">
                                 <div class="card-body">
                                     <h5 class="card-title"><?php echo htmlspecialchars($task['title']); ?></h5>
-                                    <p class="card-text"><?php echo htmlspecialchars($task['description']); ?></p>
+                                    <p class="card-text"><?php echo htmlspecialchars(substr($task['description'], 0, 100)) . '...'; ?></p>
                                     
                                     <div class="mb-3">
                                         <span class="badge badge-<?php echo $task['priority'] == 'High' ? 'danger' : ($task['priority'] == 'Medium' ? 'warning' : 'success'); ?>">
@@ -242,33 +236,13 @@ $stats = array(
                                         </span>
                                     </div>
                                     
-                                    <div class="mb-3">
+                                    <div class="d-flex justify-content-between align-items-center">
                                         <small class="text-muted">
-                                            <i class="fas fa-calendar"></i> Due: 
-                                            <?php 
-                                            $due_date = strtotime($task['due_date']);
-                                            if($due_date < time() && $task['status'] != 'Completed') {
-                                                echo '<span class="overdue">' . date('M d, Y', $due_date) . '</span>';
-                                            } else {
-                                                echo date('M d, Y', $due_date);
-                                            }
-                                            ?>
+                                            Due: <?php echo date('M d, Y', strtotime($task['due_date'])); ?>
                                         </small>
-                                    </div>
-                                    
-                                    <div class="d-flex justify-content-between">
                                         <a href="view_task.php?id=<?php echo $task['id']; ?>" class="btn btn-sm btn-info">
                                             <i class="fas fa-eye"></i> View Details
                                         </a>
-                                        <?php if($task['status'] != 'Completed'): ?>
-                                            <form action="update_status.php" method="POST" style="display: inline;">
-                                                <input type="hidden" name="task_id" value="<?php echo $task['id']; ?>">
-                                                <input type="hidden" name="status" value="Completed">
-                                                <button type="submit" class="btn btn-sm btn-success">
-                                                    <i class="fas fa-check"></i> Mark Complete
-                                                </button>
-                                            </form>
-                                        <?php endif; ?>
                                     </div>
                                 </div>
                             </div>
